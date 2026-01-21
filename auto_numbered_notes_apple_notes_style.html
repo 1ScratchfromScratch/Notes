@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Apple Notes–Style Editor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    * { box-sizing: border-box; }
+
+    :root {
+      --bg: #f2f2f7;
+      --panel: #ffffff;
+      --sidebar: #f7f7f8;
+      --border: #ddd;
+      --text: #000;
+      --muted: #e5e5ea;
+      --accent: #ffd60a;
+    }
+
+    body.dark {
+      --bg: #1c1c1e;
+      --panel: #2c2c2e;
+      --sidebar: #1f1f22;
+      --border: #3a3a3c;
+      --text: #fff;
+      --muted: #3a3a3c;
+      --accent: #ffd60a;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+    }
+
+    .sidebar {
+      width: 280px;
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      padding: 16px;
+    }
+
+    .note-item {
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 10px;
+      font-size: 14px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .locked { opacity: 0.6; }
+
+    .new-note {
+      width: 40px;
+      height: 40px;
+      margin-bottom: 12px;
+      border-radius: 10px;
+      border: none;
+      background: var(--panel);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+
+    .new-note svg {
+      width: 20px;
+      height: 20px;
+      stroke: var(--text);
+    }
+
+    .pen-colors {
+      display: flex;
+      gap: 6px;
+    }
+
+    .pen-color {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+
+    .editor {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel);
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .toolbar button {
+      border: none;
+      background: var(--muted);
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--text);
+    }
+
+    .content {
+      padding: 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .title {
+      font-size: 28px;
+      font-weight: 600;
+      border: none;
+      outline: none;
+      width: 100%;
+      margin-bottom: 16px;
+      background: transparent;
+      color: var(--text);
+    }
+
+    .item, li {
+      font-size: 17px;
+      line-height: 1.6;
+      outline: none;
+    }
+
+    canvas {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-top: 16px;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <button class="new-note" onclick="addNewNote()" title="New Note">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+    </button>
+    <h1>All iCloud</h1>
+    <input class="search" placeholder="Search" />
+  </div>
+
+  <div class="editor">
+    <div class="toolbar">
+      <button onclick="format('bold')"><b>B</b></button>
+      <button onclick="format('italic')"><i>I</i></button>
+      <button onclick="format('underline')"><u>U</u></button>
+      <button id="numberToggle" onclick="toggleNumbering()">1.</button>
+      <button onclick="toggleDrawing()">✏️</button>
+      <div class="pen-colors" id="penColors" hidden>
+        <div class="pen-color" style="background:#000" onclick="setPenColor('#000')"></div>
+        <div class="pen-color" style="background:#ff3b30" onclick="setPenColor('#ff3b30')"></div>
+        <div class="pen-color" style="background:#ffcc00" onclick="setPenColor('#ffcc00')"></div>
+        <div class="pen-color" style="background:#34c759" onclick="setPenColor('#34c759')"></div>
+        <div class="pen-color" style="background:#007aff" onclick="setPenColor('#007aff')"></div>
+      </div>
+      <button onclick="toggleLock()">🔒</button>
+      <button onclick="toggleDarkMode()">🌙</button>
+    </div>
+
+    <div class="content">
+      <input class="title" placeholder="Title" />
+      <div id="list" class="plain-list">
+        <div class="item" contenteditable="true"></div>
+      </div>
+      <canvas id="draw" width="500" height="300" hidden></canvas>
+    </div>
+  </div>
+
+  <script>
+    let notes = [];
+    let activeNoteId = null;
+    let numbered = false;
+
+    let list = document.getElementById('list');
+    const titleInput = document.querySelector('.title');
+    const sidebar = document.querySelector('.sidebar');
+    const numberToggleBtn = document.getElementById('numberToggle');
+
+    function createNote() {
+      return {
+        id: Date.now() + Math.random(),
+        title: 'New Note',
+        numbered: false,
+        items: [''],
+        locked: false,
+        drawing: null
+      };
+    }
+
+    function addNewNote() {
+      const note = createNote();
+      notes.push(note);
+      renderSidebar();
+      loadNote(note.id);
+    }
+
+    function saveActiveNote() {
+      if (!activeNoteId) return;
+      const note = notes.find(n => n.id === activeNoteId);
+      note.title = titleInput.value || 'Untitled';
+      note.numbered = numbered;
+      note.items = Array.from(list.children).map(el => el.textContent);
+      renderSidebar();
+    }
+
+    function loadNote(id) {
+      saveActiveNote();
+      const note = notes.find(n => n.id === id);
+      activeNoteId = id;
+
+      titleInput.value = note.title;
+      numbered = note.numbered;
+      numberToggleBtn.style.background = numbered ? '#ffd60a' : '#e5e5ea';
+
+      list.replaceWith(buildList(note.items));
+      list = document.getElementById('list');
+    }
+
+    function renderSidebar() {
+      sidebar.querySelectorAll('.note-item').forEach(n => n.remove());
+
+      notes.forEach(note => {
+        const el = document.createElement('div');
+        el.className = 'note-item' + (note.locked ? ' locked' : '');
+        el.innerHTML = `<span>${note.title}</span><span>${note.locked ? '🔒' : ''}</span>`;
+        el.onclick = () => {
+          if (note.locked && !unlockNote()) return;
+          loadNote(note.id);
+        };
+        sidebar.appendChild(el);
+      });
+    }
+
+    document.addEventListener('keydown', e => {
+      const current = document.activeElement;
+      if (!current || (!current.classList.contains('item') && current.tagName !== 'LI')) return;
+
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const el = document.createElement(numbered ? 'li' : 'div');
+        el.contentEditable = 'true';
+        el.className = numbered ? '' : 'item';
+        current.after(el);
+        placeCursor(el);
+      }
+
+      if (e.key === 'Backspace' && current.textContent === '') {
+        const prev = current.previousElementSibling;
+        current.remove();
+        if (prev) placeCursor(prev);
+      }
+    });
+
+    function toggleNumbering() {
+      numbered = !numbered;
+      const items = Array.from(list.children).map(el => el.textContent);
+
+      list.replaceWith(buildList(items));
+      list = document.getElementById('list');
+
+      numberToggleBtn.style.background = numbered ? '#ffd60a' : '#e5e5ea';
+    }
+
+    function buildList(items) {
+      const container = document.createElement(numbered ? 'ol' : 'div');
+      container.id = 'list';
+      if (!numbered) container.className = 'plain-list';
+
+      items.forEach(text => {
+        const el = document.createElement(numbered ? 'li' : 'div');
+        el.contentEditable = 'true';
+        if (!numbered) el.className = 'item';
+        el.textContent = text;
+        container.appendChild(el);
+      });
+
+      return container;
+    }
+
+    function placeCursor(el) {
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.selectNodeContents(el);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      el.focus();
+    }
+
+    function format(cmd) {
+      document.execCommand(cmd, false, null);
+    }
+
+    titleInput.addEventListener('input', saveActiveNote);
+    document.addEventListener('input', saveActiveNote);
+
+    addNewNote();
+
+    const canvas = document.getElementById('draw');
+    const ctx = canvas.getContext('2d');
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#000';
+    let drawing = false;
+
+    function toggleDrawing() {
+      canvas.hidden = !canvas.hidden;
+      document.getElementById('penColors').hidden = canvas.hidden;
+    }
+
+    canvas.addEventListener('pointerdown', e => {
+      drawing = true;
+      ctx.beginPath();
+      ctx.moveTo(e.offsetX, e.offsetY);
+    });
+
+    canvas.addEventListener('pointermove', e => {
+      if (!drawing) return;
+      ctx.lineTo(e.offsetX, e.offsetY);
+      ctx.stroke();
+    });
+
+    canvas.addEventListener('pointerup', () => drawing = false);
+
+    function setPenColor(color) {
+      ctx.strokeStyle = color;
+    }
+
+    function toggleLock() {
+      const note = notes.find(n => n.id === activeNoteId);
+      if (!note.locked) {
+        const pwd = prompt('Set password for this note');
+        if (!pwd) return;
+        note.password = pwd;
+        note.locked = true;
+      } else {
+        unlockNote();
+      }
+      renderSidebar();
+    }
+
+    function unlockNote() {
+      const note = notes.find(n => n.id === activeNoteId);
+      const pwd = prompt('Enter note password');
+      if (pwd === note.password) {
+        note.locked = false;
+        return true;
+      }
+      alert('Wrong password');
+      return false;
+    }
+
+    function toggleDarkMode() {
+      document.body.classList.toggle('dark');
+    }
+  </script>
+</body>
+</html>
